@@ -1,1 +1,1 @@
-python3 drumatize.py
+python3 drumatize.py $@

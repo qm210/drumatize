@@ -1,2 +1,2 @@
-python3 drumatize.py
+./start.sh $@
 aplay shit.wav
