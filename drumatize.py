@@ -6,7 +6,7 @@ import struct
 import soundfile as sf
 from random import random
 
-mode = sys.argv[1]
+mode = sys.argv[1] if len(sys.argv) > 1 else 'hardkick'
 
 def ReadStuff():
        
@@ -54,6 +54,7 @@ def WriteNewStuff(rate):
     _tri        = lambda x: 4.*abs(fract(x)-.5)-1
     s_atan      = lambda x: 2./np.pi * math.atan(x)
     s_crzy      = lambda x: clamp(s_atan(x) - 0.1*math.cos(0.9*x*math.exp(x)), -1., 1.)
+    mix         = lambda x, y, a: a*y + (1-a)*x
 
 
 #float _sin(float a) { return sin(2. * PI * mod(a,1.)); }
@@ -84,12 +85,67 @@ def WriteNewStuff(rate):
 #    data = [eval(synstr) for t in temp]
     
     data = []
-    print(sys.argv[1])
-    for i in range(int(L*rate)):
-        t = i/rate
-        s = 0.
+    drumseq = [1, 5, 3, 5, 2, 5, 4, 5];
+    drumseq_N = len(drumseq);
+    subdiv_N = 4;
+    loop_N = 4;
+    bpm = 170;
+    tick_len = 60/bpm * 1/subdiv_N;
+    L = drumseq_N/subdiv_N * loop_N * 60/bpm;
+
+    # AmpComp1 Kick_f1 Kick_f2 Kick_Dec ... see for yourself
+    P_init = [1.0, 60,  150, 0.30, 1.0, 1.0, 6000.,  800., 350., 0.010, .10, 1.0, 2.0, 0.05, 0.3, 0.3]
+    P_strt = [0.5, 40,  100, 0.01, 0.5, 0.5, 4000.,  600., 200., 0.002, .20, 0.2, 1.0, 0.01, 0.2, 0.2]
+    P_stop = [1.0, 100, 350, 0.50, 1.0, 1.0, 9999., 1500., 400., 0.015, .02, 1.5, 2.0, 0.20, 0.4, 0.4]
+
+    PM = []
+    for i in range(0, max(drumseq)):
+        P = []
+        for p in range(0, len(P_init)):
+            #P.append(mix(P_init[p], np.random.uniform(P_strt[p], P_stop[p]), .5))
+            P.append(mix(P_init[p], np.random.uniform(P_strt[p], P_stop[p]), .8))
+        PM.append(P)
         
-        if mode == 'hardkick':
+    print("writing", int(L*rate), " samples")
+    for i in range(int(L*rate)):
+        T = i/rate
+        t = T % tick_len
+        drumseq_i = int(T / tick_len) % drumseq_N
+        s = 0.
+
+        mode = 'random'
+
+        vel = 1 - drumseq[drumseq_i]/6;
+
+        for p in range(0, len(P_init)): P[p] = PM[drumseq[drumseq_i]-1][p]
+
+        if mode == 'random':
+            
+            f   = P[1] + P[2] * smoothstep(-P[3], 0., -t)
+            env = smoothstep(0.,0.01,t) * smoothstep(-0.1, 0.2, 0.3 - t)
+            #kick_body = env * .1*TRISQ(t, f, 100, 1., 1., .1, 16., 10.)
+            kick_body = (_tri(t*f) + .7*_sin(t*f*.5)) * env
+            kick_click = s_atan(40.*(1.-exp(-1000.*t))*exp(-80.*t) * _sin((1200.-1000.*sin(1000.*t*sin(30.*t)))*t))
+            kick_blobb = s_crzy(10.*(1.-exp(-1000.*t))*exp(-30.*t) * _sin((300.-300.*t)*t))
+            
+            kick = clamp(P[0] * kick_body + P[4] * kick_blobb + P[5] * kick_click, -1.0, 1.0)
+
+            f1 = P[6]
+            f2 = P[7]
+            f3 = P[8]
+            dec12 = P[9]
+            dec23 = P[9]
+            rel = P[10]
+            length = 3*P[10]
+            snr = _sin(t * (f3 + (f1-f2)*smoothstep(-dec12,0.,-t)
+                             + (f2-f3)*smoothstep(-dec12-dec23,-dec12,-t))) * smoothstep(-rel,-dec12-dec23,-t);
+            #noise = 2. * fract(sin(t * 90000.) * 45000.) * doubleslope(t,0.05,0.3,0.3);
+            noise = (2. * random()-1) * doubleslope(t,P[13],P[14],P[15])
+            snr = s_atan(P[12] * snr + P[11] * noise) * doubleslope(t,0.0,0.25,0.3) * step(t,length);
+
+            s = s_atan(kick + snr);
+            
+        elif mode == 'hardkick':
             f   = 60. + 150. * smoothstep(-0.3, 0., -t)
             env = smoothstep(0.,0.01,t) * smoothstep(-0.1, 0.2, 0.3 - t)
             kick_body = env * .1*TRISQ(t, f, 100, 1., 1., .1, 16., 10.)
@@ -115,17 +171,21 @@ def WriteNewStuff(rate):
             dec23 = 0.01
             rel = 0.1
             length = 0.3
-            snr = _tri(t * (f3 + (f1-f2)*smoothstep(-dec12,0.,-t)
+            snr = _sin(t * (f3 + (f1-f2)*smoothstep(-dec12,0.,-t)
                              + (f2-f3)*smoothstep(-dec12-dec23,-dec12,-t))) * smoothstep(-rel,-dec12-dec23,-t);
             #noise = 2. * fract(sin(t * 90000.) * 45000.) * doubleslope(t,0.05,0.3,0.3);
             noise = (2. * random()-1) * doubleslope(t,0.05,0.3,0.3)
+            noise = 0
             s = clamp(1.7 * (2. * snr + noise), -1, 1) * doubleslope(t,0.0,0.25,0.3) * step(t,length);
 
         elif mode == 'bass1':
             s = 2. * fract(_sin(t * 90.) * 45000.) * doubleslope(t,0.05,0.3,0.3);
 
         else:
-            s = eval(synstr)
+            pass
+#            s = eval(synstr)
+        
+        s *= vel;
         
         data.append(s)
         
